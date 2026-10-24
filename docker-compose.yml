@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+
+  # ==========================================
+  # 【門番】API Gateway (Traefik)
+  # すべての通信を受け止め、適切なコンテナへ振り分ける
+  # ==========================================
+  traefik:
+    image: traefik:v2.10
+    container_name: honjin-gateway
+    command:
+      - "--api.insecure=true" # 開発用ダッシュボード有効化
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "8081:80" # NASのポート8081を開放 (http://NAS_IP:8081 でアクセス)
+      - "8082:8080" # Traefikダッシュボード用
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - honjin_net
+    restart: unless-stopped
+
+  # ==========================================
+  # 【本陣中枢】Backend (FastAPI)
+  # 認証・ビジネスロジックを担当するコアAPI
+  # ==========================================
+  backend:
+    build: ./backend
+    container_name: honjin-backend
+    env_file:
+      - .env
+    volumes:
+      - ./backend/app:/app/app # ホットリロード用のマウント
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=PathPrefix(`/api`)"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - honjin_net
+    restart: unless-stopped
+
+  # ==========================================
+  # 【前衛】Frontend (React / Vite)
+  # ユーザーインターフェース (SPA)
+  # ==========================================
+  frontend:
+    build: ./frontend
+    container_name: honjin-frontend
+    volumes:
+      - ./frontend/:/app # ホットリロード用のマウント
+      - /app/node_modules
+    labels:
+      - "traefik.enable=true"
+      # /api 以外へのアクセスはすべてフロントエンドへ流す
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.services.frontend.loadbalancer.server.port=5173"
+    networks:
+      - honjin_net
+    restart: unless-stopped
+
+  # ==========================================
+  # 【兵糧庫】Database (PostgreSQL)
+  # PII分離・ハイブリッドIDを支えるメインDB
+  # ==========================================
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "15432:5432"
+    container_name: honjin-db
+    env_file:
+      - .env
+    volumes:
+      - ./infra/data/postgres:/var/lib/postgresql/data
+    networks:
+      - honjin_net
+    restart: unless-stopped
+
+  # ==========================================
+  # 【伝令】KVS (Redis)
+  # セッション管理、キャッシュ、将来のキューイング
+  # ==========================================
+  redis:
+    image: redis:7-alpine
+    container_name: honjin-redis
+    volumes:
+      - ./infra/data/redis:/data
+    networks:
+      - honjin_net
+    restart: unless-stopped
+
+networks:
+  honjin_net:
+    name: honjin_network
+    driver: bridge

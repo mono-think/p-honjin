@@ -1,0 +1,21 @@
+# 環境変数（パスワードやシークレットキー）
+.env
+
+# Docker / データベースの生データ
+infra/data/
+
+# フロントエンド (React/Vite)
+frontend/node_modules/
+frontend/dist/
+frontend/.eslintcache
+
+# バックエンド (Python/FastAPI)
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+backend/venv/
+
+# OS固有の不要ファイル
+.DS_Store
+Thumbs.db
