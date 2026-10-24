@@ -8,6 +8,7 @@ infra/data/
 frontend/node_modules/
 frontend/dist/
 frontend/.eslintcache
+frontend/.vite/
 
 # バックエンド (Python/FastAPI)
 __pycache__/
