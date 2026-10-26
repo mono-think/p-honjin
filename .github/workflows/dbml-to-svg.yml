@@ -3,9 +3,10 @@ name: Generate ER Diagram
 on:
   push:
     paths:
-      - 'schema.dbml' # このファイルが更新された時だけActionを起動
+      - 'schema.dbml'
     branches:
-      - main        # メインブランチにプッシュされた時（環境に合わせて変更してください）
+      - main
+  workflow_dispatch: 
 
 jobs:
   generate-and-commit:
