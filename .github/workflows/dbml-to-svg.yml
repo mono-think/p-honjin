@@ -1,0 +1,34 @@
+name: Generate ER Diagram
+
+on:
+  push:
+    paths:
+      - 'schema.dbml' # このファイルが更新された時だけActionを起動
+    branches:
+      - main        # メインブランチにプッシュされた時（環境に合わせて変更してください）
+
+jobs:
+  generate-and-commit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # ActionがリポジトリにSVGをプッシュするための権限
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Generate SVG from DBML
+        # npxを使って一時的にレンダラーをダウンロードし、変換を実行
+        run: npx @softwaretechnik/dbml-renderer -i schema.dbml -o schema.svg
+
+      - name: Commit and Push changes
+        # 変更されたSVGファイルを自動でコミット＆プッシュするアクション
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "docs: ER図(SVG)を自動更新"
+          file_pattern: 'schema.svg'

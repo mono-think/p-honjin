@@ -42,3 +42,8 @@ p-honjin/
 ├── infra/                # インフラ設定 (Traefik, DBデータ領域等)
 ├── docker-compose.yml    # コンテナオーケストレーション設定
 └── README.md
+```
+
+## データベース設計図 (ER図)
+
+![ER図](./schema.svg)
