@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y gcc libpq-dev && rm -rf /var/lib/apt/li
 
 #FastAPIおよび関連ライブラリのインストール
 
-RUN pip install --no-cache-dir fastapi uvicorn sqlmodel psycopg2-binary redis cryptography pydantic-settings
+RUN pip install --no-cache-dir fastapi uvicorn sqlmodel psycopg2-binary redis cryptography pydantic-settings passlib[bcrypt] PyJWT python-multipart
 
 #コードがない状態でのCOPYエラーを防ぐための空ディレクトリ作成
 
