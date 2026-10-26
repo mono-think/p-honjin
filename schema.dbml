@@ -1,0 +1,123 @@
+Project OffshorePlantBase {
+  database_type: 'PostgreSQL'
+  Note: 'エンタープライズ水準のハイブリッドID・PII分離・認証管理DB設計'
+}
+
+// -------------------------------------------------------------------------
+// Domain: Organizations (組織情報: 平文管理)
+// -------------------------------------------------------------------------
+Table companies {
+  id bigint [pk, increment]
+  public_id uuid [unique, not null, note: '外部公開用ID']
+  company_code varchar [unique, not null]
+  name varchar [not null]
+  name_en varchar
+  created_at timestamp [default: `now()`]
+  updated_at timestamp
+}
+
+Table departments {
+  id bigint [pk, increment]
+  public_id uuid [unique, not null, note: '外部公開用ID']
+  company_id bigint [not null, ref: > companies.id]
+  department_code varchar [not null]
+  name varchar [not null]
+  name_en varchar
+  created_at timestamp [default: `now()`]
+  updated_at timestamp
+}
+
+// -------------------------------------------------------------------------
+// Domain: Personals (ユーザー個人情報: ハイブリッドID & PII保護)
+// -------------------------------------------------------------------------
+Table personals {
+  id bigint [pk, increment]
+  public_id uuid [unique, not null, note: '外部公開用ID']
+  company_id bigint [ref: > companies.id, note: '所属会社']
+  department_id bigint [ref: > departments.id, note: '所属部署']
+  employee_code varchar [note: '社員番号（平文）']
+  
+  // PII: 暗号化のみ (復号用途)
+  sei_encrypted varchar [note: '姓 (AES)']
+  mei_encrypted varchar [note: '名 (AES)']
+  sei_en_encrypted varchar [note: '姓ローマ字 (AES)']
+  mei_en_encrypted varchar [note: '名ローマ字 (AES)']
+  
+  // PII: 暗号化 + ブラインドインデックス (検索用途)
+  sei_kana_encrypted varchar
+  sei_kana_bidx varchar
+  mei_kana_encrypted varchar
+  mei_kana_bidx varchar
+  
+  tel_encrypted varchar
+  tel_bidx varchar
+  
+  email_encrypted varchar
+  email_bidx varchar [unique, note: 'PostgreSQL仕様: NULL許容のUnique制約']
+  
+  mobile_tel_encrypted varchar
+  mobile_tel_bidx varchar
+  
+  mobile_email_encrypted varchar
+  mobile_email_bidx varchar [unique]
+
+  // 暗号化キー管理
+  pii_key_version integer [default: 1, note: '暗号化キーのバージョンID']
+
+  // システム日時
+  created_at timestamp [default: `now()`]
+  updated_at timestamp
+  deleted_at timestamp [note: '論理削除日時。セット時にPIIをNULLクリア']
+}
+
+// -------------------------------------------------------------------------
+// Domain: Authentication & Security (認証系: personalsと1:N)
+// -------------------------------------------------------------------------
+Table accounts {
+  id bigint [pk, increment]
+  personal_id bigint [not null, ref: > personals.id]
+  
+  // パスワードとOAuth両対応のため、すべてNULL許容
+  provider varchar [note: 'OAuthプロバイダ名 (例: google)']
+  provider_account_id varchar [note: 'OAuth側のアカウントID']
+  password_hash varchar [note: 'パスワードハッシュ']
+  
+  created_at timestamp [default: `now()`]
+  updated_at timestamp
+}
+
+Table sessions {
+  id bigint [pk, increment]
+  personal_id bigint [not null, ref: > personals.id]
+  session_token varchar [unique, not null]
+  expires_at timestamp [not null]
+  created_at timestamp [default: `now()`]
+}
+
+Table authenticators {
+  id bigint [pk, increment]
+  personal_id bigint [not null, ref: > personals.id]
+  credential_id varchar [unique, not null, note: 'WebAuthn用クレデンシャルID']
+  public_key varchar [not null]
+  provider varchar [default: 'webauthn']
+  created_at timestamp [default: `now()`]
+  updated_at timestamp
+}
+
+Table mfa_credentials {
+  id bigint [pk, increment]
+  personal_id bigint [not null, ref: > personals.id]
+  type varchar [not null, note: 'TOTP, SMS etc.']
+  secret varchar [not null]
+  is_enabled boolean [default: false]
+  created_at timestamp [default: `now()`]
+  updated_at timestamp
+}
+
+Table verification_tokens {
+  id bigint [pk, increment]
+  identifier varchar [not null, note: 'Email or Phone']
+  token varchar [not null]
+  expires_at timestamp [not null]
+  created_at timestamp [default: `now()`]
+}
