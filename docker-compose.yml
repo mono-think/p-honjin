@@ -34,6 +34,11 @@ services:
       - .env
     volumes:
       - ./backend/app:/app/app # ホットリロード用のマウント
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"       # 1ファイルあたり最大10MB
+        max-file: "5"         # 最大5世代（合計50MB）までNAS内に保持
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.backend.rule=PathPrefix(`/api`)"
