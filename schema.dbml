@@ -10,29 +10,29 @@ Note: '洋上プラント構想に基づくコアバックエンドDB'
 // Organizations (組織情報)
 // -------------------------------------------------------------------------
 Table companies {
-id bigint \[pk, increment\]
-public_id uuid \[unique, not null\]
-company_code varchar \[unique, not null\]
-name varchar \[not null\]
+id bigint [pk, increment]
+public_id uuid [unique, not null]
+company_code varchar [unique, not null]
+name varchar [not null]
 name_en varchar
-timezone varchar \[default: 'Asia/Tokyo'\]
+timezone varchar [default: 'Asia/Tokyo']
 work_start_time time
 work_end_time time
-created_at timestamp \[not null\]
+created_at timestamp [not null]
 updated_at timestamp
 }
 
 Table departments {
-id bigint \[pk, increment\]
-public_id uuid \[unique, not null\]
-company_id bigint \[not null\]
-department_code varchar \[not null\]
-name varchar \[not null\]
+id bigint [pk, increment]
+public_id uuid [unique, not null]
+company_id bigint [not null]
+department_code varchar [not null]
+name varchar [not null]
 name_en varchar
 timezone varchar
 work_start_time time
 work_end_time time
-created_at timestamp \[not null\]
+created_at timestamp [not null]
 updated_at timestamp
 }
 
@@ -40,8 +40,8 @@ updated_at timestamp
 // Personals (ユーザー個人情報: PII保護)
 // -------------------------------------------------------------------------
 Table personals {
-id bigint \[pk, increment\]
-public_id uuid \[unique, not null\]
+id bigint [pk, increment]
+public_id uuid [unique, not null]
 company_id bigint
 department_id bigint
 employee_code varchar
@@ -59,15 +59,15 @@ tel_encrypted varchar
 tel_bidx varchar
 
 email_encrypted varchar
-email_bidx varchar \[unique\]
+email_bidx varchar [unique]
 
 mobile_tel_encrypted varchar
 mobile_tel_bidx varchar
 mobile_email_encrypted varchar
-mobile_email_bidx varchar \[unique\]
+mobile_email_bidx varchar [unique]
 
-pii_key_version int \[default: 1\]
-created_at timestamp \[not null\]
+pii_key_version int [default: 1]
+created_at timestamp [not null]
 updated_at timestamp
 deleted_at timestamp
 }
@@ -76,57 +76,57 @@ deleted_at timestamp
 // Authentication, Security & Devices
 // -------------------------------------------------------------------------
 Table accounts {
-id bigint \[pk, increment\]
-personal_id bigint \[not null\]
+id bigint [pk, increment]
+personal_id bigint [not null]
 provider varchar
 provider_account_id varchar
 password_hash varchar
-emergency_bypass_enabled boolean \[default: false\]
-created_at timestamp \[not null\]
+emergency_bypass_enabled boolean [default: false]
+created_at timestamp [not null]
 updated_at timestamp
 }
 
 Table registered_devices {
-id bigint \[pk, increment\]
-personal_id bigint \[not null\]
-device_token varchar \[unique, not null, note: 'LocalStorageに保存する識別子'\]
+id bigint [pk, increment]
+personal_id bigint [not null]
+device_token varchar [unique, not null, note: 'LocalStorageに保存する識別子']
 user_agent varchar
-last_login_at timestamp \[not null\]
-created_at timestamp \[not null\]
+last_login_at timestamp [not null]
+created_at timestamp [not null]
 }
 
 Table sessions {
-id bigint \[pk, increment\]
-personal_id bigint \[not null\]
-session_token varchar \[unique, not null\]
-expires_at timestamp \[not null\]
-is_active boolean \[default: true\]
-created_at timestamp \[not null\]
+id bigint [pk, increment]
+personal_id bigint [not null]
+session_token varchar [unique, not null]
+expires_at timestamp [not null]
+is_active boolean [default: true]
+created_at timestamp [not null]
 }
 
 // -------------------------------------------------------------------------
 // Workflows & Auditing
 // -------------------------------------------------------------------------
 Table overtime_requests {
-id bigint \[pk, increment\]
-personal_id bigint \[not null\]
-target_date date \[not null\]
-start_time time \[not null\]
-end_time time \[not null\]
-reason varchar \[not null\]
-status varchar \[default: 'pending', note: 'pending, approved, rejected'\]
-created_at timestamp \[not null\]
+id bigint [pk, increment]
+personal_id bigint [not null]
+target_date date [not null]
+start_time time [not null]
+end_time time [not null]
+reason varchar [not null]
+status varchar [default: 'pending', note: 'pending, approved, rejected']
+created_at timestamp [not null]
 updated_at timestamp
 }
 
 Table audit_logs {
-id bigint \[pk, increment\]
+id bigint [pk, increment]
 personal_id bigint
-action varchar \[not null\]
+action varchar [not null]
 ip_address varchar
 user_agent varchar
-details varchar \[note: 'JSON string'\]
-created_at timestamp \[not null\]
+details varchar [note: 'JSON string']
+created_at timestamp [not null]
 }
 
 // -------------------------------------------------------------------------
