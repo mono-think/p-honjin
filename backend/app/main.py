@@ -1,18 +1,20 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Request
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi import FastAPI, Depends, HTTPException, status, Request, Header
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm, HTTPBearer, HTTPAuthorizationCredentials
 from sqlmodel import Session, select, SQLModel
-from typing import Annotated
+from typing import Annotated, Optional
 from pydantic import BaseModel
 from app.database import engine
-from app.models import Company, Department, Personal, Account, SessionRecord, AuditLog, OvertimeRequest
+from app.models import Company, Department, Personal, Account, SessionRecord, AuditLog, OvertimeRequest, RegisteredDevice
 from app.security import verify_password, get_password_hash, create_access_token, SECRET_KEY, ALGORITHM
 from app.encryption import encrypt_pii, decrypt_pii, generate_blind_index  # ← 暗号化モジュールを追加
-from datetime import datetime, timezone, time
+from datetime import datetime, timezone, time, date
 from zoneinfo import ZoneInfo
 from app.logger import logger
 from app.redis_client import redis_client
 import jwt
 from jwt.exceptions import InvalidTokenError
+import secrets
+import string
 
 app = FastAPI(
     title="Project Honjin API",
@@ -34,8 +36,7 @@ def get_session():
     with Session(engine) as session:
         yield session
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
-
+oauth2_scheme = HTTPBearer()
 
 # ==========================================
 # 1. テストユーザー登録API (PII暗号化版)
@@ -79,33 +80,11 @@ def register(req: RegisterRequest, session: Session = Depends(get_session)):
     
     return {"message": "ユーザー登録完了", "personal_id": new_personal.id}
 
-
-# ==========================================
-# 2. 認証API (PII暗号化版)
-# ==========================================
-@app.post("/api/login")
-def login(
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
-    session: Session = Depends(get_session)
-):
-    # 送信されたメールアドレス(username)をブラインドインデックス化してから検索
-    login_bidx = generate_blind_index(form_data.username)
-    account = session.exec(select(Account).where(Account.provider_account_id == login_bidx)).first()
-    
-    if not account or not account.password_hash:
-        raise HTTPException(status_code=401, detail="メールアドレスまたはパスワードが間違っています")
-    
-    if not verify_password(form_data.password, account.password_hash):
-        raise HTTPException(status_code=401, detail="メールアドレスまたはパスワードが間違っています")
-
-    access_token = create_access_token(data={"sub": str(account.personal_id)})
-    return {"access_token": access_token, "token_type": "bearer"}
-
-
 # ==========================================
 # 3. 鍵付きルートのテスト (復号化テスト)
 # ==========================================
-def get_current_user_id(token: Annotated[str, Depends(oauth2_scheme)]) -> int:
+def get_current_user_id(auth: Annotated[HTTPAuthorizationCredentials, Depends(oauth2_scheme)]) -> int:
+    token = auth.credentials  # ← 実際のトークン文字列を抽出
 
     if redis_client.get(f"blacklist:{token}"):
         raise HTTPException(
@@ -309,3 +288,204 @@ def setup_test_data(session: Session = Depends(get_session)):
         session.commit()
         
     return {"message": "テスト用企業データの投入完了", "company_id": company.id}
+
+def generate_verification_code() -> str:
+    """6桁のランダムな数字を生成"""
+    return ''.join(secrets.choice(string.digits) for _ in range(6))
+
+# ==========================================
+# 2-1. 第一段階：ログイン (デバイスチェック)
+# ==========================================
+@app.post("/api/login")
+def login(
+    request: Request,
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    session: Session = Depends(get_session),
+    # クライアントが持っているデバイストークンをHTTPヘッダーから受け取る
+    x_device_token: Optional[str] = Header(None) 
+):
+    login_bidx = generate_blind_index(form_data.username)
+    account = session.exec(select(Account).where(Account.provider_account_id == login_bidx)).first()
+    
+    if not account or not account.password_hash or not verify_password(form_data.password, account.password_hash):
+        raise HTTPException(status_code=401, detail="メールアドレスまたはパスワードが間違っています")
+
+    # ▼ 追加：端末の識別ロジック ▼
+    is_known_device = False
+    if x_device_token:
+        device = session.exec(
+            select(RegisteredDevice).where(
+                (RegisteredDevice.device_token == x_device_token) &
+                (RegisteredDevice.personal_id == account.personal_id)
+            )
+        ).first()
+        if device:
+            is_known_device = True
+            # 最終ログイン日時を更新
+            device.last_login_at = datetime.now(timezone.utc)
+            session.add(device)
+            session.commit()
+
+    if is_known_device:
+        # 知っている端末なら、そのまま本物のJWTを発行してログイン完了
+        access_token = create_access_token(data={"sub": str(account.personal_id)})
+        return {"access_token": access_token, "token_type": "bearer", "requires_verification": False}
+    else:
+        # 未知の端末なら、6桁のコードを生成してRedisに5分間保存
+        verification_code = generate_verification_code()
+        
+        # Redisのキー: "device_auth:<personal_id>"
+        redis_key = f"device_auth:{account.personal_id}"
+        redis_client.setex(redis_key, 300, verification_code) # 300秒 = 5分
+        
+        # 【重要】本来はここでユーザーのメールアドレス(復号化)宛にコードを送信します
+        # 今回はテスト用にログに出力して確認します
+        user = session.exec(select(Personal).where(Personal.id == account.personal_id)).first()
+        logger.info(
+            f"【デバイス認証】未知の端末からのログイン。確認コード: {verification_code}",
+            extra={"extra_data": {"user_id": account.personal_id, "ip": request.client.host}}
+        )
+
+        # フロントエンドには、ユーザーを識別するための一時的なトークン(temp_token)だけを渡す
+        temp_token = create_access_token(data={"sub": str(account.personal_id), "type": "temp"})
+        
+        return {
+            "message": "新しい端末からのログインです。登録メールアドレスに送信された6桁のコードを入力してください。",
+            "requires_verification": True,
+            "temp_token": temp_token
+        }
+
+# ==========================================
+# 2-2. 第二段階：デバイス認証と登録
+# ==========================================
+class DeviceVerifyRequest(BaseModel):
+    temp_token: str
+    code: str
+
+@app.post("/api/verify-device")
+def verify_device(
+    req: DeviceVerifyRequest,
+    request: Request,
+    session: Session = Depends(get_session)
+):
+    # temp_tokenの解析
+    try:
+        payload = jwt.decode(req.temp_token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("type") != "temp":
+            raise HTTPException(status_code=400, detail="無効なトークンです")
+        user_id = int(payload.get("sub"))
+    except InvalidTokenError:
+        raise HTTPException(status_code=401, detail="セッションが切れました。もう一度ログインしてください。")
+
+    # Redisからコードを取り出して検証
+    redis_key = f"device_auth:{user_id}"
+    saved_code = redis_client.get(redis_key)
+    
+    if not saved_code:
+        raise HTTPException(status_code=400, detail="確認コードの有効期限が切れています(5分)。もう一度ログインしてください。")
+    if saved_code != req.code:
+        raise HTTPException(status_code=400, detail="確認コードが間違っています。")
+
+    # 検証成功！Redisからコードを削除
+    redis_client.delete(redis_key)
+
+    # 新しいデバイストークンを生成（UUIDなど推測不可能な文字列）
+    import uuid
+    new_device_token = str(uuid.uuid4())
+    user_agent = request.headers.get("user-agent", "Unknown Device")
+
+    # 新規端末としてDBに登録
+    new_device = RegisteredDevice(
+        personal_id=user_id,
+        device_token=new_device_token,
+        user_agent=user_agent
+    )
+    session.add(new_device)
+    session.commit()
+
+    # 本物のアクセストークンを発行
+    access_token = create_access_token(data={"sub": str(user_id)})
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "device_token": new_device_token # フロントエンドはこれをLocalStorageに保存し、次回からヘッダーにつける
+    }
+
+# ==========================================
+# 4. 業務時間外申請（Overtime Request）API
+# ==========================================
+class OvertimeCreateRequest(BaseModel):
+    target_date: date
+    start_time: time
+    end_time: time
+    reason: str
+
+@app.post("/api/overtime-requests", tags=["Overtime"])
+def create_overtime_request(
+    req: OvertimeCreateRequest,
+    current_user_id: int = Depends(get_current_user_id),  # ここは門番ではなく通常の認証を使う（時間外でも申請は出せるようにするため）
+    session: Session = Depends(get_session)
+):
+    """時間外作業の事前申請を提出する"""
+    new_request = OvertimeRequest(
+        personal_id=current_user_id,
+        target_date=req.target_date,
+        start_time=req.start_time,
+        end_time=req.end_time,
+        reason=req.reason,
+        status="pending"  # 初期状態は「承認待ち」
+    )
+    session.add(new_request)
+    session.commit()
+    session.refresh(new_request)
+    
+    logger.info(
+        "時間外申請が提出されました", 
+        extra={"extra_data": {"user_id": current_user_id, "request_id": new_request.id}}
+    )
+    return {"message": "時間外申請を提出しました", "request_id": new_request.id}
+
+@app.get("/api/overtime-requests", tags=["Overtime"])
+def get_overtime_requests(
+    current_user_id: int = Depends(get_current_user_id),
+    session: Session = Depends(get_session)
+):
+    """自分の時間外申請の履歴を取得する"""
+    requests = session.exec(
+        select(OvertimeRequest).where(OvertimeRequest.personal_id == current_user_id)
+    ).all()
+    return requests
+
+
+class OvertimeStatusUpdateRequest(BaseModel):
+    status: str  # "approved" または "rejected"
+
+@app.put("/api/overtime-requests/{request_id}/status", tags=["Overtime"])
+def update_overtime_status(
+    request_id: int,
+    req: OvertimeStatusUpdateRequest,
+    # ※ 本来はここで「上長（Manager）」や「管理者」であるかの権限チェックを挟みますが、今回はテスト用に誰でも承認可能にしています
+    current_user_id: int = Depends(get_current_user_id),
+    session: Session = Depends(get_session)
+):
+    """時間外申請を承認（または却下）する"""
+    overtime_req = session.exec(
+        select(OvertimeRequest).where(OvertimeRequest.id == request_id)
+    ).first()
+    
+    if not overtime_req:
+        raise HTTPException(status_code=404, detail="申請が見つかりません")
+    
+    if req.status not in ["approved", "rejected"]:
+        raise HTTPException(status_code=400, detail="無効なステータスです")
+
+    overtime_req.status = req.status
+    session.add(overtime_req)
+    session.commit()
+    
+    logger.info(
+        f"時間外申請が {req.status} されました",
+        extra={"extra_data": {"request_id": request_id, "approved_by": current_user_id}}
+    )
+    return {"message": f"申請を {req.status} に更新しました"}

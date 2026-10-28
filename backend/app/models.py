@@ -138,3 +138,21 @@ class AuditLog(SQLModel, table=True):
     details: Optional[str] = None # 関連データなどをJSON形式で保存
     
     created_at: datetime = Field(default_factory=utcnow, index=True)
+
+# -------------------------------------------------------------------------
+# Domain: Devices (端末管理)
+# -------------------------------------------------------------------------
+class RegisteredDevice(SQLModel, table=True):
+    """ユーザーがログインを許可した（確認コードを通した）端末のリスト"""
+    __tablename__ = "registered_devices"
+    id: Optional[int] = Field(default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True))
+    personal_id: int = Field(sa_column=Column(BigInteger, nullable=False, index=True))
+    
+    # 端末を識別するためのランダムな長大文字列（フロントエンドのLocalStorageに保存させる）
+    device_token: str = Field(unique=True, index=True)
+    
+    # 端末の種類（Windows Chrome, iPhone Safari など）
+    user_agent: Optional[str] = None
+    
+    last_login_at: datetime = Field(default_factory=utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
