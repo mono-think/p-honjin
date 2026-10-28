@@ -1,6 +1,8 @@
-# Project Honjin (プロジェクト本陣)
+# Project Honjin (本陣) - Core API
 
+「洋上プラント構想」に基づく、極めてセキュアかつ実用的な業務時間管理システム（バックエンドAPI）です。
 日本の戦国時代、武将たちが戦況の変化に即座に対応して陣形を組み替えて戦ったように、柔軟かつ強靭なシステムを目指し、本プロジェクトは**「Project Honjin（プロジェクト本陣）」**と名付けられました。
+ゼロトラストアーキテクチャと日本の労務管理要件を融合させ、利便性を損なうことなく強固な防御壁を構築しています。
 
 ## 概要 (Concept & Architecture)
 
@@ -15,23 +17,47 @@
 本リポジトリはポートフォリオおよび個人的な開発の記録として公開しています。
 現在、他者からのPull RequestやIssueは受け付けておりません。 (Read-only repository)
 
-## 技術スタック
+## 🛡️ コア・アーキテクチャ（主な特徴）
 
-### Frontend
-- **React 18** / **TypeScript**
-- **Vite** (高速ビルドツール)
-- **React Router** (ルーティング)
-- **Axios** (API通信)
+### 1. 労務管理連動型ゲートキーパー（門番ロジック）
+*   **業務時間ベースのアクセス制御:** 企業や部署ごとに設定された就業時間（例: 09:00〜18:00）をリアルタイムに判定。時間外のAPIアクセスは物理的に遮断（`403 Forbidden`）します。
+*   **事前申請（残業）ルート:** 時間外であっても、承認済みの「時間外申請（OvertimeRequest）」が存在する場合は、該当時間のみアクセスを許可します。
+*   **強制ログアウトへの布石:** フロントエンドへのカウントダウン情報提供用API（`/api/work-status`）を実装し、時間切れと同時にリクエストを弾く仕組みを整備。
 
-### Backend
-- **Python 3.11+**
-- **FastAPI** (高速非同期フレームワーク)
-- **SQLModel** (Pydantic + SQLAlchemy)
+### 2. ゼロトラスト＆リスクベース認証
+*   **JWT + Redisハイブリッド管理:** 基本はステートレスなJWT（HTTPBearer）を使用しつつ、ログアウト時やセッション無効化時にはRedisのブラックリスト（TTL付き）を活用して即座にトークンを無効化します。
+*   **デバイス認証 (2FA):** 
+    *   未知の端末からのログイン時には本トークンを発行せず、一時トークン（`temp_token`）を発行。
+    *   Redisを用いて6桁の確認コードを生成・保持（有効期限5分）。
+    *   コード検証成功後に、永続的なデバイス識別子（`device_token`）を発行。次回以降はヘッダー（`x-device-token`）による透過的な識別を実現。
 
-### Database & Infrastructure
-- **PostgreSQL 15**
-- **Docker / Docker Compose**
-- **Traefik** (API Gateway / Reverse Proxy)
+### 3. PII（個人識別情報）の完全秘匿化
+*   **AES-GCM 暗号化:** メールアドレスや氏名などのPIIは、データベースに保存される前に全て暗号化。
+*   **ブラインドインデックス:** 検索が必要なカラム（メールアドレスでのログインなど）には、不可逆なハッシュ関数による「ブラインドインデックス」を利用し、平文を一切保存せずに検索を可能にしています。
+
+### 4. セキュア・ロギング
+*   JSON形式での構造化ログ出力。
+*   パスワード、トークン、シークレット等の機密情報を自動で検知し `*****` にマスキングするカスタムフォーマッター（`SecureJsonFormatter`）を搭載。
+
+## 📦 技術スタック
+
+*   **Framework:** FastAPI (Python 3)
+*   **ORM:** SQLModel (SQLAlchemy)
+*   **Database:** PostgreSQL (永続化データ・暗号化データ)
+*   **KVS:** Redis (一時コード、トークンブラックリスト管理)
+*   **Infrastructure:** Docker Compose
+
+## 🚀 API認証フロー（ログイン〜デバイス認証）
+
+1.  `POST /api/login` (ID/パスワード送信)
+    *   **既知の端末:** `access_token` 発行（ログイン完了）
+    *   **未知の端末:** `temp_token` 発行 ＆ 確認コードを送信（Redis保存）
+2.  `POST /api/verify-device` (コード確認)
+    *   `temp_token` と 6桁の `code` を送信。
+    *   成功時、本物の `access_token` と `device_token` を発行。
+3.  `GET /api/me` (保護されたルートへのアクセス)
+    *   ヘッダーに `Authorization: Bearer <access_token>` を付与。
+    *   FastAPIの `Depends(verify_working_hours)` が業務時間を自動判定。
 
 ## ディレクトリ構成
 

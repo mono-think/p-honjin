@@ -1,123 +1,143 @@
-Project OffshorePlantBase {
-  database_type: 'PostgreSQL'
-  Note: 'エンタープライズ水準のハイブリッドID・PII分離・認証管理DB設計 @ものシンク'
+// Project Honjin (本陣) - DBML Schema
+// ゼロトラスト × 労務管理 データベース構造
+
+Project Honjin {
+database_type: 'PostgreSQL'
+Note: '洋上プラント構想に基づくコアバックエンドDB'
 }
 
 // -------------------------------------------------------------------------
-// Domain: Organizations (組織情報: 平文管理)
+// Organizations (組織情報)
 // -------------------------------------------------------------------------
 Table companies {
-  id bigint [pk, increment]
-  public_id uuid [unique, not null, note: '外部公開用ID']
-  company_code varchar [unique, not null]
-  name varchar [not null]
-  name_en varchar
-  created_at timestamp [default: `now()`]
-  updated_at timestamp
+id bigint \[pk, increment\]
+public_id uuid \[unique, not null\]
+company_code varchar \[unique, not null\]
+name varchar \[not null\]
+name_en varchar
+timezone varchar \[default: 'Asia/Tokyo'\]
+work_start_time time
+work_end_time time
+created_at timestamp \[not null\]
+updated_at timestamp
 }
 
 Table departments {
-  id bigint [pk, increment]
-  public_id uuid [unique, not null, note: '外部公開用ID']
-  company_id bigint [not null, ref: > companies.id]
-  department_code varchar [not null]
-  name varchar [not null]
-  name_en varchar
-  created_at timestamp [default: `now()`]
-  updated_at timestamp
+id bigint \[pk, increment\]
+public_id uuid \[unique, not null\]
+company_id bigint \[not null\]
+department_code varchar \[not null\]
+name varchar \[not null\]
+name_en varchar
+timezone varchar
+work_start_time time
+work_end_time time
+created_at timestamp \[not null\]
+updated_at timestamp
 }
 
 // -------------------------------------------------------------------------
-// Domain: Personals (ユーザー個人情報: ハイブリッドID & PII保護)
+// Personals (ユーザー個人情報: PII保護)
 // -------------------------------------------------------------------------
 Table personals {
-  id bigint [pk, increment]
-  public_id uuid [unique, not null, note: '外部公開用ID']
-  company_id bigint [ref: > companies.id, note: '所属会社']
-  department_id bigint [ref: > departments.id, note: '所属部署']
-  employee_code varchar [note: '社員番号（平文）']
-  
-  // PII: 暗号化のみ (復号用途)
-  sei_encrypted varchar [note: '姓 (AES)']
-  mei_encrypted varchar [note: '名 (AES)']
-  sei_en_encrypted varchar [note: '姓ローマ字 (AES)']
-  mei_en_encrypted varchar [note: '名ローマ字 (AES)']
-  
-  // PII: 暗号化 + ブラインドインデックス (検索用途)
-  sei_kana_encrypted varchar
-  sei_kana_bidx varchar
-  mei_kana_encrypted varchar
-  mei_kana_bidx varchar
-  
-  tel_encrypted varchar
-  tel_bidx varchar
-  
-  email_encrypted varchar
-  email_bidx varchar [unique, note: 'PostgreSQL仕様: NULL許容のUnique制約']
-  
-  mobile_tel_encrypted varchar
-  mobile_tel_bidx varchar
-  
-  mobile_email_encrypted varchar
-  mobile_email_bidx varchar [unique]
+id bigint \[pk, increment\]
+public_id uuid \[unique, not null\]
+company_id bigint
+department_id bigint
+employee_code varchar
 
-  // 暗号化キー管理
-  pii_key_version integer [default: 1, note: '暗号化キーのバージョンID']
+sei_encrypted varchar
+mei_encrypted varchar
+sei_en_encrypted varchar
+mei_en_encrypted varchar
 
-  // システム日時
-  created_at timestamp [default: `now()`]
-  updated_at timestamp
-  deleted_at timestamp [note: '論理削除日時。セット時にPIIをNULLクリア']
+sei_kana_encrypted varchar
+sei_kana_bidx varchar
+mei_kana_encrypted varchar
+mei_kana_bidx varchar
+tel_encrypted varchar
+tel_bidx varchar
+
+email_encrypted varchar
+email_bidx varchar \[unique\]
+
+mobile_tel_encrypted varchar
+mobile_tel_bidx varchar
+mobile_email_encrypted varchar
+mobile_email_bidx varchar \[unique\]
+
+pii_key_version int \[default: 1\]
+created_at timestamp \[not null\]
+updated_at timestamp
+deleted_at timestamp
 }
 
 // -------------------------------------------------------------------------
-// Domain: Authentication & Security (認証系: personalsと1:N)
+// Authentication, Security & Devices
 // -------------------------------------------------------------------------
 Table accounts {
-  id bigint [pk, increment]
-  personal_id bigint [not null, ref: > personals.id]
-  
-  // パスワードとOAuth両対応のため、すべてNULL許容
-  provider varchar [note: 'OAuthプロバイダ名 (例: google)']
-  provider_account_id varchar [note: 'OAuth側のアカウントID']
-  password_hash varchar [note: 'パスワードハッシュ']
-  
-  created_at timestamp [default: `now()`]
-  updated_at timestamp
+id bigint \[pk, increment\]
+personal_id bigint \[not null\]
+provider varchar
+provider_account_id varchar
+password_hash varchar
+emergency_bypass_enabled boolean \[default: false\]
+created_at timestamp \[not null\]
+updated_at timestamp
+}
+
+Table registered_devices {
+id bigint \[pk, increment\]
+personal_id bigint \[not null\]
+device_token varchar \[unique, not null, note: 'LocalStorageに保存する識別子'\]
+user_agent varchar
+last_login_at timestamp \[not null\]
+created_at timestamp \[not null\]
 }
 
 Table sessions {
-  id bigint [pk, increment]
-  personal_id bigint [not null, ref: > personals.id]
-  session_token varchar [unique, not null]
-  expires_at timestamp [not null]
-  created_at timestamp [default: `now()`]
+id bigint \[pk, increment\]
+personal_id bigint \[not null\]
+session_token varchar \[unique, not null\]
+expires_at timestamp \[not null\]
+is_active boolean \[default: true\]
+created_at timestamp \[not null\]
 }
 
-Table authenticators {
-  id bigint [pk, increment]
-  personal_id bigint [not null, ref: > personals.id]
-  credential_id varchar [unique, not null, note: 'WebAuthn用クレデンシャルID']
-  public_key varchar [not null]
-  provider varchar [default: 'webauthn']
-  created_at timestamp [default: `now()`]
-  updated_at timestamp
+// -------------------------------------------------------------------------
+// Workflows & Auditing
+// -------------------------------------------------------------------------
+Table overtime_requests {
+id bigint \[pk, increment\]
+personal_id bigint \[not null\]
+target_date date \[not null\]
+start_time time \[not null\]
+end_time time \[not null\]
+reason varchar \[not null\]
+status varchar \[default: 'pending', note: 'pending, approved, rejected'\]
+created_at timestamp \[not null\]
+updated_at timestamp
 }
 
-Table mfa_credentials {
-  id bigint [pk, increment]
-  personal_id bigint [not null, ref: > personals.id]
-  type varchar [not null, note: 'TOTP, SMS etc.']
-  secret varchar [not null]
-  is_enabled boolean [default: false]
-  created_at timestamp [default: `now()`]
-  updated_at timestamp
+Table audit_logs {
+id bigint \[pk, increment\]
+personal_id bigint
+action varchar \[not null\]
+ip_address varchar
+user_agent varchar
+details varchar \[note: 'JSON string'\]
+created_at timestamp \[not null\]
 }
 
-Table verification_tokens {
-  id bigint [pk, increment]
-  identifier varchar [not null, note: 'Email or Phone']
-  token varchar [not null]
-  expires_at timestamp [not null]
-  created_at timestamp [default: `now()`]
-}
+// -------------------------------------------------------------------------
+// Relationships
+// -------------------------------------------------------------------------
+Ref: departments.company_id > companies.id
+Ref: personals.company_id > companies.id
+Ref: personals.department_id > departments.id
+
+Ref: accounts.personal_id > personals.id
+Ref: registered_devices.personal_id > personals.id
+Ref: sessions.personal_id > personals.id
+Ref: overtime_requests.personal_id > personals.id
+Ref: audit_logs.personal_id > personals.id
