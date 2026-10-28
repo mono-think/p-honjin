@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write   # ActionがリポジトリにSVGをプッシュするための権限
+      pull-requests: write
 
     steps:
       - name: Checkout Code
@@ -27,9 +28,11 @@ jobs:
         # npxを使って一時的にレンダラーをダウンロードし、変換を実行
         run: npx @softwaretechnik/dbml-renderer -i schema.dbml -o schema.svg
 
-      - name: Commit and Push changes
-        # 変更されたSVGファイルを自動でコミット＆プッシュするアクション
-        uses: stefanzweifel/git-auto-commit-action@v5
+      - name: Create Pull Request
+        # 直接プッシュせず、別ブランチを作成してPRを生成する
+        uses: peter-evans/create-pull-request@v6
         with:
-          commit_message: "docs: ER図(SVG)を自動更新"
-          file_pattern: 'schema.svg'
+          commit-message: "docs: ER図(SVG)を自動更新"
+          branch: "docs/update-er-diagram"
+          title: "docs: ER図(SVG)の自動更新"
+          body: "schema.dbml の変更に伴い、自動生成された schema.svg を更新します。"
